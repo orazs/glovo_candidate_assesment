@@ -1,0 +1,170 @@
+---
+author: "Oraz Shakirov"
+date: "3/24/2022"
+runtime: shiny
+output:
+  html_document:
+    css: "assets/style.css"
+    toc: true
+# output:
+#   slidy_presentation:
+#       css: "style.css"
+# runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(data.table)
+library(vistime)
+library(plotly)
+library(rpart.plot)
+knitr::opts_chunk$set(echo = TRUE)
+glovo <- fread("data/glovo.csv")
+glovo_model <- readRDS("data/model.RData")
+
+```
+
+## How are you planning to measure the issue?  
+
+
+There are many different measures which could be used to evaluate the quality of fraud model. From my perspective the most important are listed below. Imagine there were 1000 orders (25K $), 50(2.5K $) got canceled, 35 has been recognized as suspicious, 20 has been detected as fraud, 10 were false positives. Therefore:
+
+  * **Fraud rate (%)** 5%
+  * **Detection rate (%)** 16%
+  * **FP rate (%)** 50%
+  * **Chargeback rate (%)** 10%
+  * **Accuracy** 
+
+
+
+
+
+
+##  Key findings {.tabset .tabset-fade .tabset-pills}
+
+
+### Summary
+The goal of EDA is in finding features with the biggest impact on outcome (fraud/legitimate). There are many different approaches, but here i used ANOVA. See more on **Rules** section
+
+* Frauds are more likely to happen for android/quiero combination.  
+* Loyal clients are unlikely to be fraudsters
+* Most of the suspicion orders takes place at night hours
+* Customers with more than one account are more likely to be fraudsters
+
+### Chart
+
+```{r, echo=FALSE, warning=F}
+inputPanel(
+  selectInput("measure","Select Y", choices = c("fraud_ratio","total_ratio"),selected = "fraud_ratio"),
+  selectInput("dim1","Select X", choices = c("More than one account"="multiple_account","#orders bucket"="cut_cnt","Order Type"="order_type", "OS"="device_os"),selected = "multiple_account"),
+  selectInput("dim2","Select group", choices = c("More than one account"="multiple_account","#orders bucket"="cut_cnt","Order Type"="order_type", "OS"="device_os"),selected = "order_type")
+  
+)
+```
+
+```{r cars, fig.align="center", out.width="100%", echo=FALSE}
+
+
+glovo_df <- eventReactive(list(input$dim1,input$dim2),{
+  df <- glovo %>%
+  group_by_(input$dim1, input$dim2) %>%
+  summarise(fraud_ratio = sum(if_else(final_order_status=="CanceledStatus",1,0)/n()),N=n()) %>%
+  ungroup() %>%
+  mutate(sum(N),total_ratio=N/sum(N))
+  df
+})
+
+
+renderPlotly({
+p <- glovo_df() %>%
+  ggplot(aes_string(input$dim1, input$measure,fill=input$dim2))+
+  geom_bar(stat="identity", position = "dodge")+
+  scale_y_continuous(labels=scales::percent)+
+  scale_fill_brewer(palette = "Set1")+
+  theme(legend.position = 'bottom',legend.title = element_blank())+
+  theme_minimal()
+ 
+ p
+}
+)
+
+```
+
+
+```{r, echo=F, warning=F,fig.align="center", out.width="100%"}
+renderPlot({
+  p <-
+glovo %>%
+  group_by(order_hour) %>%
+  summarise(fraud_ratio = sum(if_else(final_order_status=="CanceledStatus",1,0)/n()),
+            total=sum(eur_amount,na.rm=T),
+            total_row= n()
+            ) %>%
+  mutate(ratio=total/sum(total),ratio2=total_row/sum(total_row)) %>%
+  ggplot(aes(order_hour, fraud_ratio))+
+  geom_line(color="red")+
+  geom_line(aes(y=ratio2/0.2),color="#00a082", stat="identity")+
+  scale_y_continuous(labels=scales::percent,
+                     name="Fraud Ratio (%)",
+                     sec.axis = sec_axis(~.*0.2, name="Profit Ratio (%)",labels=scales::percent))+
+  theme(axis.text.y = element_text(colour="red",),
+        axis.text.y.right = element_text(color = "#00a082"))+
+  theme_minimal()
+p
+})
+
+```
+
+
+## Fraud prevention {.tabset .tabset-fade .tabset-pills}
+
+###  How do you plan to measure the success
+* Using historical data and orders which happen to be fraud, we can evaluate the efficiency of rules/model
+* Testing on random orders known as fraud in advance
+* Market benchmarks
+
+### Rules
+
+```{r, echo=F, warning=F,fig.align="center", out.width="100%"}
+
+  rpart.plot(glovo_model, box.palette="GnBu", shadow.col="gray", nn=TRUE)
+
+```
+
+Here is a list of rules which could be starting point:
+
+```{r echo=F, warning=F}
+
+rpart.rules(glovo_model, cover = T,style="tallw")
+```
+
+
+
+## Other fraud types
+
+* Using stolen credit/debit cards for paying orders
+* Manipulations with distance, in case if courier's paycheck depends on how far the customer is
+* Stolen discount cards/codes
+
+
+
+## High-level plan for first 6 months
+
+
+```{r, echo=FALSE, warning=FALSE,fig.align="center", out.width="100%"}
+data <- read.csv(text="event 	group 	start	end	color	tooltip
+Getting familiar with the team and tools	Intro	2022-04-01	2022-05-01	#c8e6c9	1-1 meetings, standarts , docs etc
+Detecting problems and pain points	Intro	2022-04-01	2022-05-01	#a5d6a7	
+Defining expectations	Intro	2022-04-01	2022-05-01	#fb8c00	
+Initiate	quick win project	2022-05-01	2022-05-17	#DD4B39	eg.Increase detection rate by 2%
+Develop	quick win project	2022-05-17	2022-06-15	#DEEBF7	
+Implement	quick win project	2022-06-15	2022-07-01	#C6DBEF	
+Initiate	Project	2022-07-01	2022-07-31	#9ECAE1	eg. switching from manual orders review to automatical
+Develop	Project	2022-08-01	2022-09-01	#E5F5E0	
+Implement	Project	2022-09-01	2022-10-01	#C7E9C0",sep="\t")
+                           
+vistime(data)
+```
+
+
+
